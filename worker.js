@@ -3,7 +3,7 @@
 //   GROQ_KEY      (secret)  free key from console.groq.com/keys   [text questions, fast]
 //   GEMINI_KEY    (secret)  optional, from aistudio.google.com/apikey [needed to read images]
 //   ACCESS_CODE   (secret)  optional password the toolkit sends, stops strangers using your quota
-//   GROQ_MODELS   (text)    optional, comma list. default: llama-3.3-70b-versatile
+//   GROQ_MODELS   (text)    optional. Leave empty: the server asks Groq which models work and picks the best.
 //   GEMINI_MODELS (text)    optional, comma list. default: gemini-3.8-flash
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -61,6 +61,23 @@ async function callGroq(env, model, system, contents, wantJson) {
   }
 }
 
+
+// Groq retires model names often, so ask Groq which models this key can use and pick the best few.
+let groqCache = { t: 0, list: [] };
+async function groqModels(env) {
+  if (env.GROQ_MODELS) return env.GROQ_MODELS.split(",").map(s => s.trim()).filter(Boolean);
+  if (Date.now() - groqCache.t < 600000 && groqCache.list.length) return groqCache.list;
+  try {
+    const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: "Bearer " + env.GROQ_KEY } });
+    const j = await r.json();
+    const ids = (j.data || []).map(m => m.id).filter(id => !/whisper|guard|tts|playai|orpheus|embed|safeguard|compound|moderation/i.test(id));
+    const score = id => (/gpt-oss-120b/.test(id) ? 6 : 0) + (/70b|maverick|120b/.test(id) ? 4 : 0) + (/versatile/.test(id) ? 2 : 0) + (/qwen|kimi|scout|gpt-oss/.test(id) ? 2 : 0) + (/instant|8b|20b/.test(id) ? 1 : 0);
+    const list = ids.sort((a, b) => score(b) - score(a)).slice(0, 4);
+    if (list.length) groqCache = { t: Date.now(), list };
+    return list;
+  } catch (e) { return []; }
+}
+
 export default {
   async fetch(req, env) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -78,7 +95,7 @@ export default {
 
     const errs = [];
     const gm = (env.GEMINI_MODELS || "gemini-3.8-flash").split(",").map(s => s.trim()).filter(Boolean);
-    const qm = (env.GROQ_MODELS || "llama-3.3-70b-versatile").split(",").map(s => s.trim()).filter(Boolean);
+    const qm = (!hasImg && env.GROQ_KEY) ? await groqModels(env) : [];
     const plan = [];
     if (!hasImg && env.GROQ_KEY) qm.forEach(m => plan.push(["groq", m]));
     if (env.GEMINI_KEY) gm.forEach(m => plan.push(["gemini", m]));
