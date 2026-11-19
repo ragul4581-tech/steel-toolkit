@@ -2,5 +2,10 @@
   "name": "steel-toolkit",
   "main": "worker.js",
   "compatibility_date": "2026-06-01",
-  "keep_vars": true
+  "keep_vars": true,
+  "assets": {
+    "directory": "./manuals",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
 }
